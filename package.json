@@ -1,0 +1,40 @@
+{
+  "name": "vantage-inventory",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Offline-first barcode product management system",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@zxing/browser": "^0.2.1",
+    "@zxing/library": "^0.23.0",
+    "clsx": "^2.1.1",
+    "dexie": "^4.4.7",
+    "dexie-react-hooks": "^4.4.0",
+    "jsbarcode": "^3.12.3",
+    "lucide-react": "^1.79.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.6",
+    "tailwind-merge": "^3.7.1",
+    "zxing-wasm": "^3.1.7"
+  },
+  "devDependencies": {
+    "@types/jsbarcode": "^3.12.3",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8",
+    "vite-plugin-pwa": "^2.0.0"
+  }
+}
