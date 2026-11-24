@@ -47,6 +47,8 @@ export interface ScanRecord {
 
 export type LabelSize = 'standard' | 'large';
 
+export type UsbScanSuffix = 'enter' | 'tab' | 'both';
+
 export type CurrencyCode =
   | 'PKR'
   | 'USD'
@@ -66,6 +68,8 @@ export interface AppSettings {
   scannerSound: boolean;
   /** Duplicate scans of the same code are ignored for this many seconds. */
   duplicateWindowSeconds: number;
+  /** Key a USB keyboard-wedge scanner appends after a complete code. */
+  usbScanSuffix: UsbScanSuffix;
   defaultLabelSize: LabelSize;
   lastBackupAt?: Date;
 }

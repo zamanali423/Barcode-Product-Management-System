@@ -1,21 +1,37 @@
 import type { Product, ScanRecord, ScanSource } from '../types';
 import { db } from './database';
 
-export async function getProductByBarcode(rawBarcode: string): Promise<Product | null> {
-  const barcode = rawBarcode.trim();
-  if (!barcode) return null;
-  return (await db.products.where('barcode').equals(barcode).first()) ?? null;
+/**
+ * Finds a product by barcode. Besides the scanned value, callers can supply
+ * valid GTIN equivalents (for example UPC-A saved as a thirteen-digit GTIN),
+ * so a physical code matches however it was originally stored.
+ */
+export async function getProductByBarcode(
+  rawBarcode: string,
+  alternatives: Iterable<string> = [],
+): Promise<Product | null> {
+  const candidates = [
+    ...new Set(
+      [rawBarcode, ...alternatives]
+        .map((candidate) => candidate.trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (candidates.length === 0) return null;
+  const products = await db.products.where('barcode').anyOf(candidates).toArray();
+  return products[0] ?? null;
 }
 
 export async function lookupAndRecordScan(
   rawBarcode: string,
   source: ScanSource,
   format?: string,
+  alternatives: Iterable<string> = [],
 ): Promise<{ product: Product | null; barcode: string }> {
   const barcode = rawBarcode.trim();
   if (!barcode) return { product: null, barcode };
 
-  const product = await getProductByBarcode(barcode);
+  const product = await getProductByBarcode(barcode, alternatives);
   try {
     await db.scans.add({
       barcode,

@@ -24,6 +24,8 @@ export interface ScanResult {
   at: Date;
   /** Detected or validated symbology, or "Unknown Format". */
   format?: string;
+  /** Whether a format-specific check digit passed, when applicable. */
+  checkDigitValid?: boolean;
   /** Explains an invalid check digit when format inference rejected a value. */
   formatNote?: string;
   /** Set when decoding succeeded but the local catalogue query failed. */
@@ -152,9 +154,7 @@ export function ScanResultPanel({
         <div className="flex flex-1 flex-col px-4 py-4 sm:px-5 sm:py-5">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="brand">{result.product.category || 'Uncategorised'}</Badge>
-            {result.format && result.format !== UNKNOWN_BARCODE_FORMAT ? (
-              <Badge variant="outline">{result.format}</Badge>
-            ) : null}
+            <Badge variant="outline">{result.format ?? UNKNOWN_BARCODE_FORMAT}</Badge>
             <span className="text-[10.5px] text-muted">
               SKU{' '}
               <span className="font-mono text-[10.5px] text-[#475569]">
@@ -238,7 +238,7 @@ export function ScanResultPanel({
           </h3>
           <p className="mx-auto mt-1 max-w-[350px] text-[12px] leading-5 text-muted">
             {result.lookupError
-              ? 'The code was decoded, but the local catalogue could not be queried. The scanned value is preserved below.'
+              ? 'The code was decoded, but the local catalogue could not be queried. This is a database error, not a scanning failure. The scanned value is preserved below.'
               : 'The code was read successfully, but no product in this local catalogue is registered with it.'}
           </p>
           <p className="mt-1.5 text-[10px] text-subtle">
@@ -286,6 +286,11 @@ export function ScanResultPanel({
                 <p className="mt-1 truncate text-[11.5px] font-medium text-ink">
                   {unknownFormat}
                 </p>
+                {result.checkDigitValid === false ? (
+                  <p className="mt-1 text-[9.5px] font-medium text-warning">
+                    Check digit did not pass
+                  </p>
+                ) : null}
               </div>
             </div>
 

@@ -25,100 +25,55 @@ export const SUPPORTED_BARCODE_FORMATS = [
   'MaxiCode',
 ] as const;
 
-/** Human-readable names for the formats zxing-wasm can decode. */
-export function barcodeFormatLabel(
-  format: string | null | undefined,
-): string | undefined {
-  switch (format) {
-    case 'Aztec':
-    case 'AztecCode':
-      return 'Aztec';
-    case 'Codabar':
-      return 'Codabar';
-    case 'Code39':
-    case 'Code39Std':
-    case 'Code39Ext':
-      return 'CODE39';
-    case 'Code93':
-      return 'CODE93';
-    case 'Code128':
-      return 'CODE128';
-    case 'DataMatrix':
-      return 'Data Matrix';
-    case 'EAN8':
-      return 'EAN-8';
-    case 'EAN13':
-      return 'EAN-13';
-    case 'ITF':
-      return 'ITF';
-    case 'ITF14':
-      return 'ITF-14';
-    case 'MaxiCode':
-      return 'MaxiCode';
-    case 'PDF417':
-    case 'CompactPDF417':
-      return 'PDF417';
-    case 'QRCode':
-    case 'QRCodeModel1':
-    case 'QRCodeModel2':
-      return 'QR Code';
-    case 'MicroQRCode':
-      return 'Micro QR';
-    case 'RMQRCode':
-      return 'rMQR';
-    case 'DataBar':
-    case 'DataBarOmni':
-    case 'DataBarStk':
-    case 'DataBarStkOmni':
-      return 'GS1 DataBar';
-    case 'DataBarExp':
-    case 'DataBarExpStk':
-      return 'GS1 DataBar Expanded';
-    case 'UPCA':
-      return 'UPC-A';
-    case 'UPCE':
-      return 'UPC-E';
-    default:
-      return undefined;
-  }
-}
+/** Canonical zxing/wasm format name to the label shown in the scanner UI. */
+const FORMAT_LABELS: Record<string, string> = {
+  Aztec: 'Aztec',
+  AztecCode: 'Aztec',
+  Codabar: 'Codabar',
+  Code39: 'CODE39',
+  Code39Std: 'CODE39',
+  Code39Ext: 'CODE39',
+  Code93: 'CODE93',
+  Code128: 'CODE128',
+  CompactPDF417: 'PDF417',
+  DataBar: 'GS1 DataBar',
+  DataBarOmni: 'GS1 DataBar',
+  DataBarStk: 'GS1 DataBar',
+  DataBarStkOmni: 'GS1 DataBar',
+  DataBarLtd: 'GS1 DataBar',
+  DataBarExp: 'GS1 DataBar Expanded',
+  DataBarExpStk: 'GS1 DataBar Expanded',
+  DataMatrix: 'Data Matrix',
+  EAN8: 'EAN-8',
+  EAN13: 'EAN-13',
+  ITF: 'ITF',
+  ITF14: 'ITF-14',
+  MaxiCode: 'MaxiCode',
+  MicroQRCode: 'Micro QR',
+  PDF417: 'PDF417',
+  QRCode: 'QR Code',
+  QRCodeModel1: 'QR Code',
+  QRCodeModel2: 'QR Code',
+  RMQRCode: 'rMQR',
+  UPCA: 'UPC-A',
+  UPCE: 'UPC-E',
+};
+
+const FORMAT_LABEL_SET = new Set(Object.values(FORMAT_LABELS));
 
 /**
- * Normalizes values returned by the native decoder. zxing-wasm expands UPC-E
- * to a GTIN-13, so the original eight-digit code is read from the extra
- * metadata; UPC-A is returned as a thirteen-digit GTIN with a leading zero.
+ * Human-readable name for a decoded symbology. Accepts canonical zxing names
+ * and labels already produced by this function, so stored scan records can be
+ * re-interpreted safely. Returns undefined for "None"/unknown values.
  */
-export function normalizeDecodedBarcode(
-  rawText: string,
-  decodedFormat?: string | null,
-  extra?: string | null,
-): string {
-  const text = rawText.trim();
-  if (decodedFormat === 'UPCE' && extra) {
-    try {
-      const metadata = JSON.parse(extra) as { UPCE?: unknown };
-      if (typeof metadata.UPCE === 'string' && /^\d{8}$/.test(metadata.UPCE)) {
-        return metadata.UPCE;
-      }
-    } catch {
-      // Fall back to the decoder text below.
-    }
-  }
-  if (decodedFormat === 'UPCA' && /^0\d{12}$/.test(text)) {
-    return text.slice(1);
-  }
-  return text;
+export function barcodeFormatLabel(format: string | null | undefined): string | undefined {
+  if (!format) return undefined;
+  const value = format.trim();
+  if (!value || value === 'None' || value === UNKNOWN_BARCODE_FORMAT) return undefined;
+  return FORMAT_LABELS[value] ?? (FORMAT_LABEL_SET.has(value) ? value : undefined);
 }
 
-export interface BarcodeFormatResolution {
-  /** A detected format name, or {@link UNKNOWN_BARCODE_FORMAT}. */
-  format: string;
-  /** Whether a format-specific check digit passed. Undefined when not applicable. */
-  checkDigitValid?: boolean;
-  /** Explains an invalid check digit or an incomplete format hint. */
-  note?: string;
-}
-
+/** GS1 mod-10 check digit for a body of digits (weighting 3,1 from the right). */
 function gs1CheckDigit(body: string): number {
   let sum = 0;
   for (let index = 0; index < body.length; index += 1) {
@@ -133,10 +88,31 @@ function passesGs1CheckDigit(value: string): boolean {
   return gs1CheckDigit(value.slice(0, -1)) === Number(value[value.length - 1]);
 }
 
+function isUpcE(value: string): boolean {
+  const upcA = upcEToUpcA(value);
+  return upcA !== null;
+}
+
+function isEan13(value: string): boolean {
+  return /^\d{13}$/.test(value) && passesGs1CheckDigit(value);
+}
+
+function isEan8(value: string): boolean {
+  return /^\d{8}$/.test(value) && passesGs1CheckDigit(value);
+}
+
+function isUpcA(value: string): boolean {
+  return /^\d{12}$/.test(value) && passesGs1CheckDigit(value);
+}
+
+function isItf14(value: string): boolean {
+  return /^\d{14}$/.test(value) && passesGs1CheckDigit(value);
+}
+
 /**
- * Expands an eight-digit UPC-E value to the eleven UPC-A digits (without the
- * check digit) used for its checksum. Returns null when the number system or
- * payload shape is not UPC-E.
+ * Expands the eleven UPC-A digits (without the check digit) encoded by an
+ * eight-digit UPC-E value. Returns null when the number system or payload
+ * shape is not UPC-E.
  */
 function upcEExpandedBody(value: string): string | null {
   if (!/^[01]\d{7}$/.test(value)) return null;
@@ -165,25 +141,35 @@ function upcEExpandedBody(value: string): string | null {
   return body.length === 11 ? body : null;
 }
 
-function isUpcE(value: string): boolean {
+/** Expands a verified eight-digit UPC-E value to its twelve-digit UPC-A form. */
+function upcEToUpcA(value: string): string | null {
   const body = upcEExpandedBody(value);
-  return body !== null && gs1CheckDigit(body) === Number(value[7]);
+  if (!body) return null;
+  if (gs1CheckDigit(body) !== Number(value[7])) return null;
+  return `${body}${value[7]}`;
 }
 
-function isEan13(value: string): boolean {
-  return /^\d{13}$/.test(value) && passesGs1CheckDigit(value);
+/**
+ * zxing-cpp reports UPC-A symbols as a thirteen-digit EAN-13 value with a
+ * leading zero. GS1 defines that number as UPC-A, so strip the zero when the
+ * remaining twelve digits form a valid UPC-A.
+ */
+function upcAFromGtin13(value: string): string | null {
+  if (!/^0\d{12}$/.test(value)) return null;
+  const upcA = value.slice(1);
+  return isUpcA(upcA) ? upcA : null;
 }
 
-function isEan8(value: string): boolean {
-  return /^\d{8}$/.test(value) && passesGs1CheckDigit(value);
-}
-
-function isUpcA(value: string): boolean {
-  return /^\d{12}$/.test(value) && passesGs1CheckDigit(value);
-}
-
-function isItf14(value: string): boolean {
-  return /^\d{14}$/.test(value) && passesGs1CheckDigit(value);
+function upcEFromExtra(extra?: string | null): string | null {
+  if (!extra) return null;
+  try {
+    const metadata = JSON.parse(extra) as { UPCE?: unknown };
+    return typeof metadata.UPCE === 'string' && /^\d{8}$/.test(metadata.UPCE)
+      ? metadata.UPCE
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function validateDecodedFormat(
@@ -217,79 +203,156 @@ function validateDecodedFormat(
 }
 
 /**
- * Resolves a barcode format without consulting the product catalogue.
- *
- * Camera decoders supply a format; keyboard-wedge scanners and manual entry
- * only supply text. In that case, conservative format-specific rules identify
- * GTIN-family values (including their check digits). Values that cannot be
- * identified safely remain "Unknown Format" rather than being guessed.
+ * Values to try against the local catalogue. The decoded value is always
+ * first; UPC/GTIN equivalents cover records stored in another valid form,
+ * e.g. a UPC-A saved as its thirteen-digit GTIN or a UPC-E saved expanded.
  */
-export function resolveBarcodeFormat(
+function barcodeLookupVariants(value: string): string[] {
+  const variants = new Set<string>();
+  if (value) variants.add(value);
+
+  if (/^\d{8}$/.test(value)) {
+    const upcA = upcEToUpcA(value);
+    if (upcA) {
+      variants.add(upcA);
+      variants.add(`0${upcA}`);
+    }
+  } else if (/^\d{12}$/.test(value)) {
+    variants.add(`0${value}`);
+  } else if (/^0\d{12}$/.test(value)) {
+    const upcA = value.slice(1);
+    if (isUpcA(upcA)) variants.add(upcA);
+  }
+
+  return [...variants];
+}
+
+export interface BarcodeInterpretation {
+  /** Value to display, store and prefill. Preserved unless it is a UPC form. */
+  value: string;
+  /** Detected or validated symbology label, or "Unknown Format". */
+  format: string;
+  /** Whether a format-specific check digit passed. Undefined when not applicable. */
+  checkDigitValid?: boolean;
+  /** Explains an invalid check digit or an inferred format. */
+  note?: string;
+  /** Values to search in Dexie: the value plus valid GTIN equivalents. */
+  lookupValues: string[];
+}
+
+function buildInterpretation(
+  value: string,
+  format: string,
+  checkDigitValid?: boolean,
+  note?: string,
+): BarcodeInterpretation {
+  return {
+    value,
+    format,
+    checkDigitValid,
+    note,
+    lookupValues: barcodeLookupVariants(value),
+  };
+}
+
+/**
+ * Interprets a scanned value independently of the product catalogue.
+ *
+ * Camera decoders supply a symbology and optional metadata; keyboard-wedge
+ * scanners and manual entry only supply text. Without decoder metadata,
+ * GTIN-family formats are inferred only when their check digit passes. A
+ * decoder-supplied format is always displayed, with a note when the value
+ * fails validation, instead of being hidden.
+ */
+export function interpretBarcode(
   rawValue: string,
   decodedFormat?: string | null,
-): BarcodeFormatResolution {
-  const value = rawValue.trim();
-  const supplied = decodedFormat?.trim();
+  extra?: string | null,
+): BarcodeInterpretation {
+  const original = rawValue.trim();
+  if (!original) return buildInterpretation(original, UNKNOWN_BARCODE_FORMAT);
 
-  if (supplied && supplied !== UNKNOWN_BARCODE_FORMAT) {
+  const decodedLabel = barcodeFormatLabel(decodedFormat);
+
+  if (decodedLabel) {
+    let value = original;
+    if (decodedLabel === 'UPC-E') {
+      value = upcEFromExtra(extra) ?? original;
+    }
+
+    if (decodedLabel === 'EAN-13' || decodedLabel === 'UPC-A') {
+      const upcA = upcAFromGtin13(value);
+      if (upcA) return buildInterpretation(upcA, 'UPC-A', true);
+    }
+
     const effectiveFormat =
-      supplied === 'ITF' && isItf14(value) ? 'ITF-14' : supplied;
+      decodedLabel === 'ITF' && isItf14(value) ? 'ITF-14' : decodedLabel;
     const validation = validateDecodedFormat(effectiveFormat, value);
     if (validation.valid === false) {
-      return {
-        format: UNKNOWN_BARCODE_FORMAT,
-        checkDigitValid: false,
-        note: `${validation.note} The decoded value is preserved below.`,
-      };
+      return buildInterpretation(
+        value,
+        effectiveFormat,
+        false,
+        `${validation.note} The decoded value is preserved below.`,
+      );
     }
-    return { format: effectiveFormat, checkDigitValid: validation.valid };
+    return buildInterpretation(value, effectiveFormat, validation.valid);
   }
 
-  if (!/^\d+$/.test(value)) {
-    return { format: UNKNOWN_BARCODE_FORMAT };
+  if (!/^\d+$/.test(original)) {
+    return buildInterpretation(original, UNKNOWN_BARCODE_FORMAT);
   }
 
-  switch (value.length) {
-    case 13:
-      if (isEan13(value)) {
-        return { format: 'EAN-13', checkDigitValid: true };
-      }
-      return {
-        format: UNKNOWN_BARCODE_FORMAT,
-        checkDigitValid: false,
-        note: 'This is a 13-digit value, but its EAN-13 check digit is invalid.',
-      };
-    case 12:
-      if (isUpcA(value)) {
-        return { format: 'UPC-A', checkDigitValid: true };
-      }
-      return {
-        format: UNKNOWN_BARCODE_FORMAT,
-        checkDigitValid: false,
-        note: 'This is a 12-digit value, but its UPC-A check digit is invalid.',
-      };
-    case 8:
-      if (isUpcE(value)) {
-        return { format: 'UPC-E', checkDigitValid: true };
-      }
-      if (isEan8(value)) {
-        return { format: 'EAN-8', checkDigitValid: true };
-      }
-      return {
-        format: UNKNOWN_BARCODE_FORMAT,
-        checkDigitValid: false,
-        note: 'This 8-digit value does not pass EAN-8 or UPC-E check-digit validation.',
-      };
-    case 14:
-      if (isItf14(value)) {
-        return { format: 'ITF-14', checkDigitValid: true };
-      }
-      return {
-        format: UNKNOWN_BARCODE_FORMAT,
-        checkDigitValid: false,
-        note: 'This is a 14-digit value, but its GS1 check digit is invalid.',
-      };
+  switch (original.length) {
+    case 8: {
+      if (isUpcE(original)) return buildInterpretation(original, 'UPC-E', true);
+      if (isEan8(original)) return buildInterpretation(original, 'EAN-8', true);
+      return buildInterpretation(
+        original,
+        UNKNOWN_BARCODE_FORMAT,
+        false,
+        'This 8-digit value does not pass EAN-8 or UPC-E check-digit validation.',
+      );
+    }
+    case 12: {
+      if (isUpcA(original)) return buildInterpretation(original, 'UPC-A', true);
+      return buildInterpretation(
+        original,
+        UNKNOWN_BARCODE_FORMAT,
+        false,
+        'This is a 12-digit value, but its UPC-A check digit is invalid.',
+      );
+    }
+    case 13: {
+      const upcA = upcAFromGtin13(original);
+      if (upcA) return buildInterpretation(upcA, 'UPC-A', true);
+      if (isEan13(original)) return buildInterpretation(original, 'EAN-13', true);
+      return buildInterpretation(
+        original,
+        UNKNOWN_BARCODE_FORMAT,
+        false,
+        'This is a 13-digit value, but its EAN-13 check digit is invalid.',
+      );
+    }
+    case 14: {
+      if (isItf14(original)) return buildInterpretation(original, 'ITF-14', true);
+      return buildInterpretation(
+        original,
+        UNKNOWN_BARCODE_FORMAT,
+        false,
+        'This is a 14-digit value, but its GS1 check digit is invalid.',
+      );
+    }
     default:
-      return { format: UNKNOWN_BARCODE_FORMAT };
+      return buildInterpretation(original, UNKNOWN_BARCODE_FORMAT);
   }
+}
+
+/** Backwards-compatible helper returning only the normalized decoded value. */
+export function normalizeDecodedBarcode(
+  rawText: string,
+  decodedFormat?: string | null,
+  extra?: string | null,
+): string {
+  return interpretBarcode(rawText, decodedFormat, extra).value;
 }

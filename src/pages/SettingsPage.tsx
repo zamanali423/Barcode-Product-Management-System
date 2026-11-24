@@ -22,7 +22,7 @@ import { useInstallPrompt, useOnlineStatus } from '../hooks/useEnvironment';
 import { CURRENCIES } from '../lib/currencies';
 import { messageFromError } from '../lib/errors';
 import { cn, downloadJson, formatDateTime, formatNumber, pluralize } from '../lib/utils';
-import type { CurrencyCode } from '../types';
+import type { CurrencyCode, UsbScanSuffix } from '../types';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { ConfirmDialog, Dialog } from '../components/ui/Dialog';
@@ -314,6 +314,27 @@ export default function SettingsPage() {
                       {seconds} second{seconds === 1 ? '' : 's'}
                     </option>
                   ))}
+                </Select>
+              </SettingRow>
+              <SettingRow
+                title="USB scanner ending key"
+                description="The key your keyboard-wedge scanner appends after a complete code."
+              >
+                <Select
+                  value={settings.usbScanSuffix}
+                  onChange={(event) =>
+                    void savePreference(
+                      { usbScanSuffix: event.target.value as UsbScanSuffix },
+                      'Could not update the USB scanner ending key',
+                    )
+                  }
+                  aria-label="USB scanner ending key"
+                  className="h-8 w-[150px] rounded-md text-[11.5px]"
+                  wrapperClassName="inline-block"
+                >
+                  <option value="enter">Enter</option>
+                  <option value="tab">Tab</option>
+                  <option value="both">Enter or Tab</option>
                 </Select>
               </SettingRow>
             </div>

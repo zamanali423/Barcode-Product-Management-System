@@ -23,7 +23,7 @@ import { updateSettings } from '../db/settings';
 import { useCameraScanner } from '../hooks/useCameraScanner';
 import { useRecentScans, useSettings } from '../hooks/useDatabaseData';
 import { useUsbScanner } from '../hooks/useUsbScanner';
-import { resolveBarcodeFormat, UNKNOWN_BARCODE_FORMAT } from '../lib/barcodeFormats';
+import { interpretBarcode, UNKNOWN_BARCODE_FORMAT, type BarcodeInterpretation } from '../lib/barcodeFormats';
 import { messageFromError } from '../lib/errors';
 import { playScanFeedback } from '../lib/feedback';
 import { cn, formatRelativeTime } from '../lib/utils';
@@ -57,16 +57,15 @@ export default function ScannerPage() {
   }, []);
 
   const handleBarcode = useCallback(
-    async (rawBarcode: string, source: ScanSource, decodedFormat?: string) => {
-      const barcode = rawBarcode.trim();
+    async (reading: BarcodeInterpretation, source: ScanSource) => {
+      const barcode = reading.value.trim();
       if (!barcode) return;
 
-      // Recognition is independent of the catalogue. A camera supplies the
-      // symbology; USB and manual input infer a validated retail format when
-      // the value itself is conclusive.
-      const resolvedFormat = resolveBarcodeFormat(barcode, decodedFormat);
+      // Decoding, format validation and catalogue lookup are separate steps.
+      // The value and detected format come only from the decoder (or validated
+      // GTIN inference for keyboard/manual input); only then is Dexie queried.
       const recordingFormat =
-        resolvedFormat.format === UNKNOWN_BARCODE_FORMAT ? undefined : resolvedFormat.format;
+        reading.format === UNKNOWN_BARCODE_FORMAT ? undefined : reading.format;
 
       const now = Date.now();
       const duplicateWindow = settings.duplicateWindowSeconds * 1000;
@@ -84,14 +83,22 @@ export default function ScannerPage() {
       setDuplicateNotice(false);
 
       try {
-        const { product } = await lookupAndRecordScan(barcode, source, recordingFormat);
+        const { product } = await lookupAndRecordScan(
+          barcode,
+          source,
+          recordingFormat,
+          reading.lookupValues,
+        );
         const next: ScanResult = {
           barcode,
           product,
           source,
           at: new Date(),
-          format: resolvedFormat.format,
-          ...(resolvedFormat.note ? { formatNote: resolvedFormat.note } : {}),
+          format: reading.format,
+          ...(reading.note ? { formatNote: reading.note } : {}),
+          ...(reading.checkDigitValid === undefined
+            ? {}
+            : { checkDigitValid: reading.checkDigitValid }),
         };
         resultRef.current = next;
         setResult(next);
@@ -105,8 +112,11 @@ export default function ScannerPage() {
           product: null,
           source,
           at: new Date(),
-          format: resolvedFormat.format,
-          ...(resolvedFormat.note ? { formatNote: resolvedFormat.note } : {}),
+          format: reading.format,
+          ...(reading.note ? { formatNote: reading.note } : {}),
+          ...(reading.checkDigitValid === undefined
+            ? {}
+            : { checkDigitValid: reading.checkDigitValid }),
           lookupError,
         };
         resultRef.current = next;
@@ -124,8 +134,9 @@ export default function ScannerPage() {
 
   useUsbScanner({
     enabled: true,
+    suffix: settings.usbScanSuffix,
     onScan: (barcode) => {
-      void handleBarcode(barcode, 'usb');
+      void handleBarcode(interpretBarcode(barcode), 'usb');
     },
   });
 
@@ -143,8 +154,8 @@ export default function ScannerPage() {
     toggleTorch,
   } = useCameraScanner({
     autoStart: true,
-    onResult: (barcode, format) => {
-      void handleBarcode(barcode, 'camera', format);
+    onResult: (reading) => {
+      void handleBarcode(reading, 'camera');
     },
   });
 
@@ -177,22 +188,23 @@ export default function ScannerPage() {
     }
     setManualValue('');
     manualInputRef.current?.blur();
-    void handleBarcode(value, 'manual');
+    void handleBarcode(interpretBarcode(value), 'manual');
   };
 
   const handleRecentSelect = async (scan: ScanRecord) => {
-    const decodedFormat =
-      scan.format && scan.format !== UNKNOWN_BARCODE_FORMAT ? scan.format : undefined;
-    const resolvedFormat = resolveBarcodeFormat(scan.barcode, decodedFormat);
+    const reading = interpretBarcode(scan.barcode, scan.format);
     try {
-      const product = await getProductByBarcode(scan.barcode);
+      const product = await getProductByBarcode(reading.value, reading.lookupValues);
       const next: ScanResult = {
-        barcode: scan.barcode,
+        barcode: reading.value,
         product,
         source: scan.source,
         at: new Date(),
-        format: resolvedFormat.format,
-        ...(resolvedFormat.note ? { formatNote: resolvedFormat.note } : {}),
+        format: reading.format,
+        ...(reading.note ? { formatNote: reading.note } : {}),
+        ...(reading.checkDigitValid === undefined
+          ? {}
+          : { checkDigitValid: reading.checkDigitValid }),
       };
       resultRef.current = next;
       setResult(next);
@@ -247,11 +259,18 @@ export default function ScannerPage() {
           ? 'Use a USB scanner or manual entry below'
           : 'Start the camera to scan barcodes';
 
+  const usbSuffixLabel =
+    settings.usbScanSuffix === 'enter'
+      ? 'Enter'
+      : settings.usbScanSuffix === 'tab'
+        ? 'Tab'
+        : 'Enter or Tab';
+
   return (
     <div className="space-y-5">
       <PageHeader
         title="Barcode scanner"
-        description="Scan any common 1D or 2D barcode with a camera, USB scanner, or manual entry. Registered products appear instantly; unregistered codes are still captured for registration."
+        description="Scan any common 1D or 2D barcode with a camera, USB scanner, or manual entry. Decoding and format detection work without the catalogue; registered products appear instantly and unknown codes are captured with their value and format."
         actions={
           <Button
             iconLeft={settings.scannerSound ? <Volume2 size={14} /> : <VolumeX size={14} />}
@@ -455,8 +474,8 @@ export default function ScannerPage() {
                 <div>
                   <p className="text-[12px] font-medium text-ink">USB barcode scanner ready</p>
                   <p className="mt-0.5 text-[10.5px] leading-4 text-muted">
-                    Scan at any time while this page is open. Codes ending with Enter are detected
-                    automatically.
+                    Scan at any time while this page is open. Codes ending with {usbSuffixLabel} are
+                    detected automatically; the ending key can be changed in Settings.
                   </p>
                 </div>
               </div>

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { UsbScanSuffix } from '../types';
 import { isEditableTarget } from '../lib/utils';
 
 interface UseUsbScannerOptions {
@@ -7,17 +8,27 @@ interface UseUsbScannerOptions {
   minLength?: number;
   /** Max delay between keystrokes for scanner-like input. */
   maxKeystrokeGapMs?: number;
+  /** Which key(s) a USB scanner appends to complete a code. */
+  suffix?: UsbScanSuffix;
 }
 
+const SUFFIX_KEYS: Record<UsbScanSuffix, ReadonlySet<string>> = {
+  enter: new Set(['Enter']),
+  tab: new Set(['Tab']),
+  both: new Set(['Enter', 'Tab']),
+};
+
 /**
- * USB scanners act as keyboards: they type the code rapidly and end with Enter.
- * This listens globally on the scanner screen while ignoring real text inputs.
+ * USB scanners act as keyboards: they type the code rapidly and end with
+ * Enter or Tab. This listens globally on the scanner screen while ignoring
+ * real text inputs and only emits complete codes.
  */
 export function useUsbScanner({
   enabled,
   onScan,
   minLength = 4,
   maxKeystrokeGapMs = 80,
+  suffix = 'both',
 }: UseUsbScannerOptions) {
   const onScanRef = useRef(onScan);
   const bufferRef = useRef('');
@@ -30,6 +41,7 @@ export function useUsbScanner({
   useEffect(() => {
     if (!enabled) return;
 
+    const terminatorKeys = SUFFIX_KEYS[suffix];
     const reset = () => {
       bufferRef.current = '';
       lastKeyTimeRef.current = 0;
@@ -37,6 +49,7 @@ export function useUsbScanner({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.isComposing || event.repeat) return;
       if (isEditableTarget(event.target)) return;
 
       if (event.key === 'Escape') {
@@ -44,7 +57,7 @@ export function useUsbScanner({
         return;
       }
 
-      if (event.key === 'Enter') {
+      if (terminatorKeys.has(event.key)) {
         const value = bufferRef.current.trim();
         reset();
         if (value.length >= minLength) {
@@ -74,5 +87,5 @@ export function useUsbScanner({
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [enabled, minLength, maxKeystrokeGapMs]);
+  }, [enabled, minLength, maxKeystrokeGapMs, suffix]);
 }

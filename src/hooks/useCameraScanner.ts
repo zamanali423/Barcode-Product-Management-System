@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { prepareZXingModule, readBarcodes } from 'zxing-wasm/reader';
 import zxingWasmUrl from 'zxing-wasm/reader/zxing_reader.wasm?url';
 import {
-  barcodeFormatLabel,
-  normalizeDecodedBarcode,
+  interpretBarcode,
   SUPPORTED_BARCODE_FORMATS,
+  type BarcodeInterpretation,
 } from '../lib/barcodeFormats';
 
 export type CameraStatus = 'idle' | 'starting' | 'active' | 'error';
@@ -15,14 +15,27 @@ export interface CameraOption {
 }
 
 interface UseCameraScannerOptions {
-  onResult: (barcode: string, format?: string) => void;
+  onResult: (reading: BarcodeInterpretation) => void;
   autoStart?: boolean;
 }
 
-const DECODE_INTERVAL_MS = 180;
+const DECODE_INTERVAL_MS = 160;
 const SUCCESS_INTERVAL_MS = 900;
-const MAX_DECODE_WIDTH = 960;
+const MAX_DECODE_WIDTH = 1600;
 const PERMISSION_TIMEOUT_MS = 15_000;
+
+const READER_OPTIONS = {
+  formats: [...SUPPORTED_BARCODE_FORMATS],
+  tryHarder: true,
+  maxNumberOfSymbols: 1,
+};
+
+interface CameraCapabilities extends MediaTrackCapabilities {
+  torch?: boolean;
+  focusMode?: string[];
+  exposureMode?: string[];
+  whiteBalanceMode?: string[];
+}
 
 let modulePromise: Promise<unknown> | null = null;
 
@@ -61,6 +74,45 @@ function friendlyCameraError(error: unknown): string {
     default:
       return 'The camera could not be started. Check your browser permissions and try again.';
   }
+}
+
+function readCapabilities(track: MediaStreamTrack | null): CameraCapabilities | undefined {
+  if (!track?.getCapabilities) return undefined;
+  try {
+    return track.getCapabilities() as CameraCapabilities;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Requests continuous autofocus/exposure/white balance when the device
+ * exposes them. Every constraint is applied separately because browsers
+ * reject the whole set if one entry is unsupported.
+ */
+async function applyCameraEnhancements(track: MediaStreamTrack): Promise<CameraCapabilities | undefined> {
+  const capabilities = readCapabilities(track);
+  const constraints: MediaTrackConstraintSet[] = [];
+
+  if (capabilities?.focusMode?.includes('continuous')) {
+    constraints.push({ focusMode: 'continuous' } as MediaTrackConstraintSet);
+  }
+  if (capabilities?.exposureMode?.includes('continuous')) {
+    constraints.push({ exposureMode: 'continuous' } as MediaTrackConstraintSet);
+  }
+  if (capabilities?.whiteBalanceMode?.includes('continuous')) {
+    constraints.push({ whiteBalanceMode: 'continuous' } as MediaTrackConstraintSet);
+  }
+
+  for (const constraint of constraints) {
+    try {
+      await track.applyConstraints({ advanced: [constraint] });
+    } catch {
+      // The feature is optional and varies by device/browser.
+    }
+  }
+
+  return capabilities;
 }
 
 export function useCameraScanner({ onResult, autoStart = false }: UseCameraScannerOptions) {
@@ -149,13 +201,15 @@ export function useCameraScanner({ onResult, autoStart = false }: UseCameraScann
         video: requestedDeviceId
           ? {
               deviceId: { exact: requestedDeviceId },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              frameRate: { ideal: 30 },
             }
           : {
               facingMode: { ideal: 'environment' },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              frameRate: { ideal: 30 },
             },
       };
 
@@ -210,10 +264,13 @@ export function useCameraScanner({ onResult, autoStart = false }: UseCameraScann
         if (track) {
           const actualDeviceId = track.getSettings().deviceId;
           if (actualDeviceId) setActiveDeviceId(actualDeviceId);
-          const capabilities = track.getCapabilities?.() as
-            | (MediaTrackCapabilities & { torch?: boolean })
-            | undefined;
-          setTorchSupported(Boolean(capabilities?.torch));
+
+          const enhancement = applyCameraEnhancements(track);
+          setTorchSupported(Boolean(readCapabilities(track)?.torch));
+          void enhancement.then((capabilities) => {
+            if (session !== sessionRef.current) return;
+            setTorchSupported(Boolean(capabilities?.torch));
+          });
 
           track.addEventListener('ended', () => {
             if (session !== sessionRef.current) return;
@@ -266,29 +323,23 @@ export function useCameraScanner({ onResult, autoStart = false }: UseCameraScann
                 if (context) {
                   context.drawImage(currentVideo, 0, 0, canvasWidth, canvasHeight);
                   const imageData = context.getImageData(0, 0, canvasWidth, canvasHeight);
-                  const results = await readBarcodes(imageData, {
-                    formats: [...SUPPORTED_BARCODE_FORMATS],
-                    tryHarder: true,
-                    maxNumberOfSymbols: 1,
-                  });
+                  const results = await readBarcodes(imageData, READER_OPTIONS);
                   if (session !== sessionRef.current) return;
 
-                  const decoded = results.find((result) => result.isValid) ?? results[0];
+                  const decoded =
+                    results.find((result) => result.isValid && result.text.trim()) ??
+                    results.find((result) => result.text.trim());
                   if (decoded?.text) {
-                    const value = normalizeDecodedBarcode(
-                      decoded.text,
-                      decoded.format,
-                      decoded.extra,
-                    );
-                    if (value) {
+                    const reading = interpretBarcode(decoded.text, decoded.format, decoded.extra);
+                    if (reading.value) {
                       nextScanAtRef.current = Date.now() + SUCCESS_INTERVAL_MS;
-                      onResultRef.current(value, barcodeFormatLabel(decoded.format));
+                      onResultRef.current(reading);
                     }
                   }
                 }
               } catch (decodeError) {
-                // Frames without a readable code reject normally; keep scanning.
-                console.error('Camera frame decode failed', decodeError);
+                // A frame that cannot be decoded is normal; keep scanning.
+                console.warn('Camera frame decode failed', decodeError);
               } finally {
                 decodingRef.current = false;
               }

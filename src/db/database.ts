@@ -32,6 +32,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   currency: 'PKR',
   scannerSound: true,
   duplicateWindowSeconds: 2,
+  usbScanSuffix: 'both',
   defaultLabelSize: 'standard',
 };
 

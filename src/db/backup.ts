@@ -11,6 +11,7 @@ import type {
   RestoreMode,
   ScanRecord,
   ScanSource,
+  UsbScanSuffix,
 } from '../types';
 import { DEFAULT_SETTINGS, db } from './database';
 
@@ -118,6 +119,12 @@ function sanitizeSettings(value: unknown): AppSettings | undefined {
     value.defaultLabelSize === 'large' || value.defaultLabelSize === 'standard'
       ? value.defaultLabelSize
       : DEFAULT_SETTINGS.defaultLabelSize;
+  const usbScanSuffix: UsbScanSuffix =
+    value.usbScanSuffix === 'enter' ||
+    value.usbScanSuffix === 'tab' ||
+    value.usbScanSuffix === 'both'
+      ? value.usbScanSuffix
+      : DEFAULT_SETTINGS.usbScanSuffix;
   return {
     key: 'app',
     storeName:
@@ -128,6 +135,7 @@ function sanitizeSettings(value: unknown): AppSettings | undefined {
         ? value.scannerSound
         : DEFAULT_SETTINGS.scannerSound,
     duplicateWindowSeconds,
+    usbScanSuffix,
     defaultLabelSize: labelSize,
     lastBackupAt: parseDate(value.lastBackupAt),
   };
